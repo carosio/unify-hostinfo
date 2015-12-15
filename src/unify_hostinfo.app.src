@@ -1,0 +1,8 @@
+{application, unify_hostinfo,
+ [{description, "Distribute Unify HostInfo via IS-IS"},
+  {vsn, "1"},
+  {registered, []},
+  {applications, []},
+  {mod, { unify_hostinfo_app, []}},
+  {env, []}
+]}.
