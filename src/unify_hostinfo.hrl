@@ -41,3 +41,9 @@
 
 -record (hostinfo_memused, {
 	   memory_used :: integer()}).
+
+-record (hostinfo_memavail, {
+	   memory_avail :: integer()}).
+
+-record (hostinfo_cpucount, {
+	   count :: integer()}).

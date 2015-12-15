@@ -197,16 +197,36 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+get_core_count() ->
+    Output = os:cmd("grep -E 'processor\\s*:' /proc/cpuinfo | wc -l"),
+    case string:to_integer(Output) of
+	{error, Reason} ->
+	    error_logger:error_msg("Couldn't get cpu count: ~p (Input: ~p)", [Reason, Output]),
+	    [];
+	{Int, _} ->
+	    [#hostinfo_cpucount{count = Int}]
+    end.
+
+get_meminfo() ->
+    Output = os:cmd("sed -n 's/MemTotal: *\\([0-9]*\\) kB/\\1/p' /proc/meminfo"),
+    case string:to_integer(Output) of
+	{error, Reason} ->
+	    error_logger:error_msg("Couldn't get available memory: ~p (Input: ~p)", [Reason, Output]),
+	    [];
+	{Int, _} ->
+	    [#hostinfo_memavail{memory_avail = Int}]
+    end.
+
 get_hostinfo() ->
     {ok, Hostname} = inet:gethostname(),
     Processor = os:cmd("uname -m"),
-    MemUsed = erlang:memory(processes_used),
+    MemInfo = get_meminfo(),
     [
      #hostinfo_hostname{hostname = Hostname},
-     #hostinfo_processor{processor = Processor},
-     #hostinfo_memused{memory_used = MemUsed}
-    ].
-    
+     #hostinfo_processor{processor = Processor}
+    ] ++ get_meminfo() ++ get_core_count().
+
 set_initial_state() ->
     TLVs = get_hostinfo(),
     #state{hosts = dict:new(),
@@ -331,7 +351,11 @@ encode_tlv(#hostinfo_hostname{hostname = H}) ->
 encode_tlv(#hostinfo_processor{processor = P}) ->
     encode_tlv(2, erlang:list_to_binary(P));
 encode_tlv(#hostinfo_memused{memory_used = M}) ->
-    encode_tlv(3, <<M:64>>).
+    encode_tlv(3, <<M:64>>);
+encode_tlv(#hostinfo_memavail{memory_avail = M}) ->
+    encode_tlv(4, <<M:64>>);
+encode_tlv(#hostinfo_cpucount{count = C}) ->
+    encode_tlv(5, <<C:32>>).
 
 encode_tlv(T, V) ->
     S = byte_size(V),
@@ -342,19 +366,30 @@ decode_tlv(1, Value) ->
 decode_tlv(2, Value) ->
     #hostinfo_processor{processor = erlang:binary_to_list(Value)};
 decode_tlv(3, <<M:64>>) ->
-    #hostinfo_memused{memory_used = M}.
+    #hostinfo_memused{memory_used = M};
+decode_tlv(4, <<M:64>>) ->
+    #hostinfo_memavail{memory_avail = M};
+decode_tlv(5, <<C:32>>) ->
+    #hostinfo_cpucount{count = C}.
 
 %% 1 TLV per type in hostinfo, so we replace Though with the dns-sd
 %% stuff, we must match exactly as we can have multiple of the same
 %% type of TLV
 mergetype_tlv(#hostinfo_hostname{}) -> replace;
 mergetype_tlv(#hostinfo_processor{}) -> replace;
-mergetype_tlv(#hostinfo_memused{}) -> replace.
+mergetype_tlv(#hostinfo_memused{}) -> replace;
+mergetype_tlv(#hostinfo_memavail{}) -> replace;
+mergetype_tlv(#hostinfo_cpucount{}) -> replace.
 
 
 pp_hostinfo_tlv(#hostinfo_hostname{hostname = H}) ->
     {"Hostname", H};
 pp_hostinfo_tlv(#hostinfo_processor{processor = P}) ->
-    {"Processor", P};
+    {"Architecture", P};
 pp_hostinfo_tlv(#hostinfo_memused{memory_used = M}) ->
-    {"Memory Used", lists:flatten(io_lib:format("~p", [M]))}.
+    {"Memory Used", lists:flatten(io_lib:format("~p", [M]))};
+pp_hostinfo_tlv(#hostinfo_memavail{memory_avail = M}) ->
+    Megs = M div 1024,
+    {"Memory Available", lists:flatten(io_lib:format("~p MiB", [Megs]))};
+pp_hostinfo_tlv(#hostinfo_cpucount{count = C}) ->
+    {"CPU Cores", lists:flatten(io_lib:format("~p", [C]))}.
